@@ -1,0 +1,4 @@
+node_modules
+tests
+scripts/dev-server.ts
+.env
