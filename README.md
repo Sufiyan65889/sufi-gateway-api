@@ -11,86 +11,56 @@ Friends' apps ──(sufi-ai-…)──►  Vercel /v1  ──►  OpenAI / Open
                                    └── per-key limits: RPM / RPD / TPD
 ```
 
+## 🛠️ Deployment notes (read if you fork this)
+
+Vercel's Node builder has sharp edges this repo already solves:
+
+1. **ESM local imports** — Vercel transpiles each API file separately, so
+   extensionless imports like `../lib/app` crash with `ERR_MODULE_NOT_FOUND`.
+   Fix: `npm run build:fn` (runs on `postinstall`) bundles `scripts/entry.ts`
+   into `api/_bundle.mjs` with esbuild, and the function imports that one file.
+2. **Routing** — `api/[...route]` only matches a single segment, and nested
+   catch-alls are ignored. Fix: `vercel.json` rewrites **every** path to
+   `/api/index`; Vercel preserves the original URL, and `api/index.mjs` maps
+   `/v1/*` onto the Hono routes at `/api/v1/*`.
+3. **Handler signature** — the function exports the Web `fetch` handler
+   (`export const fetch`). A bare default export receives `(req, res)` and breaks
+   Hono with `this.raw.headers.get is not a function`.
+4. **SSO Protection** — keep **Vercel Authentication OFF** for this project,
+   otherwise `*.vercel.app` URLs answer `deployment_authentication_required`
+   instead of your API.
+
 ## ✨ What it does
 
 - **Admin login** with scrypt-hashed passwords and JWT sessions.
-- **Unlimited API keys**, each with its own:
-  - provider (OpenAI Chat, OpenAI Responses, Anthropic, or any compatible base URL)
-  - provider keys (`api.txt` paste or one per line — encrypted with AES-256-GCM)
-  - RPM / RPD / TPD limits, enforced server-side
-  - routing mode: ordered failover or random key per request
-  - streaming on/off (default on)
-  - usage: requests, tokens (1K / 1M / 1B formatting), latency
-- **Three request formats on the same key:**
-  - `POST /v1/chat/completions` (OpenAI Chat)
-  - `POST /v1/responses` (OpenAI Responses)
-  - `POST /v1/messages` (Anthropic Messages)
-- **`GET /v1/models`** – the models your provider exposes, filtered per key.
-- **Streaming (SSE)** translated into the format the caller expects.
-- **Failover:** 401/403/402/408/429/5xx/timeout tries the next provider key with the
-  same body; 400/404 stops immediately. Failed keys cool down, then recover.
-- **Usage dashboard data** per key and in total.
+- **Unlimited API keys**, each with its own provider, provider keys, limits,
+  routing (ordered/random), streaming toggle and usage counters.
+- **Three request formats on one key:** `/v1/chat/completions`,
+  `/v1/responses`, `/v1/messages`.
+- **`GET /v1/models`** filtered per key, synced from the provider.
+- **Streaming (SSE)** translated into the caller's format.
+- **Failover:** 401/403/402/408/429/5xx/timeout -> next provider key; 400/404 stops.
+- **Server-side RPM / RPD / TPD** enforced in Postgres under an advisory lock.
 
-## 🧱 Stack
+## 1️⃣ Database
 
-| Piece | Choice | Why |
-|---|---|---|
-| Runtime | Vercel Functions (Node 22) | free public HTTPS URL, 300 s limit |
-| Framework | Hono | tiny, fast, one catch-all function |
-| Database | Neon / Vercel Postgres | serverless-friendly Postgres |
-| Auth | jose (HS256 JWT) | no session store needed |
-| Crypto | node:crypto | scrypt passwords, AES-256-GCM secrets |
+Neon (or any Postgres): copy the connection string. Tables are created on the
+first request — no migration step.
 
-No Redis needed: rate limits are enforced with a Postgres advisory lock inside one
-transaction, which is correct under concurrency.
+## 2️⃣ Vercel
 
-## 1️⃣ Create the database (2 minutes)
+Import this repo on <https://vercel.com/new> (framework: *Other*, no build
+command). Keep the project name `sufi-gateway-api` for the default URL.
 
-1. Go to <https://neon.com> → **New Project** → pick the region closest to you.
-2. Copy the **connection string** (starts with `postgres://…?sslmode=require`).
+| Env var | Notes |
+|---|---|
+| `DATABASE_URL` | Neon connection string |
+| `JWT_SECRET` | `openssl rand -base64 48` |
+| `ENCRYPTION_KEY` | `openssl rand -base64 48` |
+| `SETUP_TOKEN` | one-time code for the first admin |
+| `PUBLIC_BASE_URL` | `https://sufi-gateway-api.vercel.app` |
 
-Tables are created automatically on the first request — no migration step.
-
-## 2️⃣ Deploy to Vercel
-
-### Option A — GitHub (recommended)
-
-```bash
-# from this folder
-git init
-git add .
-git commit -m "Sufi Gateway API"
-git branch -M main
-git remote add origin https://github.com/<you>/sufi-gateway-api.git
-git push -u origin main
-```
-
-Then on <https://vercel.com/new> → **Import** that repo → **Deploy**.
-Framework preset: **Other**. Build command: leave empty. Output directory: leave empty.
-
-### Option B — CLI
-
-```bash
-npm i -g vercel
-vercel            # first deploy, link the project
-vercel --prod     # production
-```
-
-## 3️⃣ Environment variables (Vercel → Settings → Environment Variables)
-
-| Name | Example | Notes |
-|---|---|---|
-| `DATABASE_URL` | `postgres://…?sslmode=require` | Neon connection string |
-| `JWT_SECRET` | output of `openssl rand -base64 48` | admin session signing |
-| `ENCRYPTION_KEY` | output of `openssl rand -base64 48` | encrypts provider keys |
-| `SETUP_TOKEN` | any long random string | used once to create the admin |
-| `PUBLIC_BASE_URL` | `https://sufi-gateway-api.vercel.app` | no trailing slash |
-
-Redeploy after adding them (**Deployments → ⋯ → Redeploy**).
-
-## 4️⃣ Create your admin (once)
-
-Open the app, or:
+## 3️⃣ First admin
 
 ```bash
 curl -X POST https://sufi-gateway-api.vercel.app/api/setup \
@@ -98,10 +68,9 @@ curl -X POST https://sufi-gateway-api.vercel.app/api/setup \
   -d '{"setupToken":"YOUR_SETUP_TOKEN","email":"you@example.com","password":"at-least-8-chars"}'
 ```
 
-You get a JWT back. **Then delete `SETUP_TOKEN` from Vercel** and redeploy — a
-second admin can never be created.
+Then rotate `SETUP_TOKEN` in Vercel — a second admin can never be created.
 
-## 5️⃣ Use it
+## 4️⃣ Use it
 
 ```bash
 curl https://sufi-gateway-api.vercel.app/v1/chat/completions \
@@ -110,64 +79,21 @@ curl https://sufi-gateway-api.vercel.app/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}],"stream":true}'
 ```
 
-Point any OpenAI SDK at `https://sufi-gateway-api.vercel.app/v1` and use a
-`sufi-ai-…` key as the API key.
-
 ## 🧪 Local development
 
 ```bash
-cp .env.example .env      # fill DATABASE_URL, secrets, ALLOW_LOCAL_PROVIDER=true
+cp .env.example .env      # DATABASE_URL, secrets, ALLOW_LOCAL_PROVIDER=true
 npm install
 npm run db:init
 npm run dev               # http://localhost:3000
 npm test                  # unit tests
-bash tests/e2e.sh         # full API flow against a mock provider (needs Docker Postgres)
+bash tests/e2e.sh         # full flow against a mock provider
 ```
 
-## 🔐 Security notes
+## 🔐 Security
 
-- Provider keys are encrypted at rest; the API never returns them, only `••••1234`.
-- API keys are stored as SHA-256 hashes; the raw key is shown **once**.
-- Every query is parameterised; scrypt (N=16384, r=8, p=1) for passwords.
-- Provider base URLs must be `https://` (SSRF protection); `ALLOW_LOCAL_PROVIDER=true`
-  is only for local testing.
-- Login is rate limited per IP (20 attempts / 15 minutes).
-
-## 📚 API reference
-
-### Public (needs `Authorization: Bearer sufi-ai-…`)
-
-| Method | Path | Format |
-|---|---|---|
-| GET | `/v1/models` | OpenAI list |
-| POST | `/v1/chat/completions` | OpenAI Chat |
-| POST | `/v1/responses` | OpenAI Responses |
-| POST | `/v1/messages` | Anthropic Messages |
-| GET | `/v1/me` | key info + today's usage |
-
-### Admin (needs `Authorization: Bearer <jwt>`)
-
-| Method | Path |
-|---|---|
-| GET | `/api/setup/status` |
-| POST | `/api/setup` |
-| POST | `/api/auth/login` |
-| GET | `/api/admin/providers` · POST · PATCH `/:id` · DELETE `/:id` |
-| GET | `/api/admin/providers/:id/models` · POST · PATCH `/:id/models/:modelId` · DELETE |
-| GET | `/api/admin/keys` · POST · GET `/:id` · PATCH `/:id` · DELETE `/:id` |
-| POST | `/api/admin/keys/:id/revoke` · `/activate` |
-| GET/POST | `/api/admin/keys/:id/credentials` |
-| PATCH/DELETE | `/api/admin/keys/:id/credentials/:credentialId` |
-| POST | `/api/admin/keys/:id/credentials/test` |
-| GET | `/api/admin/keys/:id/models` · POST `.../models/sync` · PATCH `.../models` |
-| GET | `/api/admin/keys/:id/usage?days=30` |
-| POST | `/api/admin/playground/chat` |
-| GET | `/api/admin/usage/summary?days=14` · `/api/admin/usage/logs` |
-| GET/PUT | `/api/admin/settings` |
-
-## ⚠️ Limits of the free tier
-
-- Vercel Hobby: **300 s** per function, ~4.5 MB request body.
-- Neon free plan: compute sleeps when idle, so the first request after a pause is slower.
-- For heavy production traffic, move the same code to a real VPS (`npm run dev` behind
-  Caddy) — nothing needs to change.
+- Provider keys encrypted at rest (AES-256-GCM); only `••••1234` is returned.
+- API keys stored as SHA-256 hashes; shown once.
+- Parameterised SQL everywhere; scrypt (N=16384) passwords.
+- Provider base URLs must be `https://` (SSRF guard).
+- Login rate limited per IP (20 / 15 min).
