@@ -7,6 +7,7 @@
     "node": "24.x"
   },
   "scripts": {
+    "postinstall": "npm run build:fn",
     "dev": "node --env-file-if-exists=.env --import tsx scripts/dev-server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
