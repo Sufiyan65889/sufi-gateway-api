@@ -1,6 +1,8 @@
-// Vercel entry (plain ESM, no TypeScript step).
-// The whole app is bundled into ./_bundle.mjs by `npm run build:fn` (postinstall),
-// so Node never has to resolve extensionless local modules at runtime.
-import handler from './_bundle.mjs';
+// Vercel entry (Node runtime, Web fetch signature).
+// The whole Hono app is bundled into ./_bundle.mjs by `npm run build:fn`
+// during install, so no TypeScript step and no ESM extension issues.
+import { app } from './_bundle.mjs';
 
-export default handler;
+export const fetch = (request) => app.fetch(request);
+
+export default { fetch };
