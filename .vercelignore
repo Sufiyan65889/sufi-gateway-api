@@ -1,4 +1,5 @@
 node_modules
 tests
 scripts/dev-server.ts
+scripts/db-init.ts
 .env

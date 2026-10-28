@@ -1,14 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build:fn",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 300,
-      "memory": 1024
+      "includeFiles": "api/_bundle.mjs"
     }
   },
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/v1", "destination": "/api/v1" },
-    { "source": "/v1/:path*", "destination": "/api/v1/:path*" }
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/v1",
+      "destination": "/api/v1"
+    },
+    {
+      "source": "/v1/:path*",
+      "destination": "/api/v1/:path*"
+    }
   ]
 }
