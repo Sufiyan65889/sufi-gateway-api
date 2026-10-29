@@ -5,7 +5,17 @@
       "maxDuration": 300
     }
   },
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://8080-agqu4ugc36ljahcfvkijefibeq.instabox.tech/",
+      "permanent": false
+    }
+  ],
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/v1", "destination": "/api/index" },
+    { "source": "/v1/:path*", "destination": "/api/index" },
+    { "source": "/health", "destination": "/api/index" }
   ]
 }
